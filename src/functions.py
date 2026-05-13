@@ -1,8 +1,8 @@
 import pandas as pd
-import numpy as np
 from pathlib import Path
 
 from scipy.stats import bootstrap
+
 
 rand_seed = 42
 
@@ -88,8 +88,10 @@ def catboost_space(trial):
         'verbose': 0
     }
 
+
 def median_ci(series, confidence=0.95, n_resamples=9_999, seed=42):
     # Bootstrap percentile CI for the median
+    import numpy as np
     res = bootstrap(
         (series.values,),
         statistic=np.median,

@@ -29,7 +29,7 @@ class HeartDiseasernCV:
         self.n_inner = n_inner
         self.results = {}
 
-    def get_preprocessing_pipeline(self):
+    def get_preprocessing_pipeline(self, cat_categories=None):
         cat_features = ['cp', 'restecg', 'slope', 'thal']
         num_features = ['age', 'trestbps', 'chol', 'thalach', 'oldpeak', 'ca']
         bin_features = ['sex', 'fbs', 'exang']  # Binary: no encoding needed, only imputation
@@ -40,7 +40,10 @@ class HeartDiseasernCV:
         ])
         cat_transformer = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='most_frequent')),
-            ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+            ('onehot', OneHotEncoder(
+                categories=cat_categories if cat_categories is not None else 'auto',
+                handle_unknown='ignore',
+                sparse_output=False))
         ])
         bin_transformer = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='most_frequent'))
@@ -57,6 +60,8 @@ class HeartDiseasernCV:
         
         # Executes Task 3 (Generalization) or Task 4 (Feature Selection)
         
+        cat_features = ['cp', 'restecg', 'slope', 'thal']
+        cat_categories = [sorted(X[col].dropna().unique().tolist()) for col in cat_features]
         all_metrics = []
         feature_counts = None
         feature_names = None
@@ -71,7 +76,14 @@ class HeartDiseasernCV:
 
                 # Inner Loop: Hyperparameter Tuning
                 if tune:
-                    best_params = self.inner_optimization(X_train_out, y_train_out, estimator, param_space_func, inner_seed=r * self.n_outer + fold_idx)
+                    best_params = self.inner_optimization(
+                        X_train_out,
+                        y_train_out,
+                        estimator,
+                        param_space_func,
+                        inner_seed=r * self.n_outer + fold_idx,
+                        cat_categories=cat_categories
+                    )
                 
                 # Outer Loop: Model Training
                 current_clf = clone(estimator)
@@ -79,7 +91,7 @@ class HeartDiseasernCV:
                     current_clf.set_params(**best_params)
                 
                 # Define Pipeline steps 
-                steps = [('pre', self.get_preprocessing_pipeline())]                
+                steps = [('pre', self.get_preprocessing_pipeline(cat_categories=cat_categories))]                
                 if perform_fs: # Task 4: Model-agnostic Feature Selection
                     selector = RFECV(
                         estimator=RandomForestClassifier(random_state=42),
@@ -127,32 +139,31 @@ class HeartDiseasernCV:
                     'precision': precision_score(y_test_out, preds, zero_division=0)
                 })
 
-        if perform_fs:
+        if perform_fs and feature_counts is not None:
             feature_stability = pd.Series(
                 feature_counts / (self.n_rounds * self.n_outer),
                 index=feature_names
             ).sort_values(ascending=False)
             print(feature_stability)
 
+
         return pd.DataFrame(all_metrics)
 
         
-    def inner_optimization(self, X, y, estimator, param_space_func, inner_seed=42):
+    def inner_optimization(self, X, y, estimator, param_space_func, inner_seed=42, cat_categories=None):
 
         # Optuna-based inner loop for hyperparameter tuning
 
         def objective(trial):
             params = param_space_func(trial)
-            trial.set_user_attr('full_params', json.dumps(
-                {k: (v if v != 'auto' else 'auto') for k, v in params.items()}
-            ))
+            trial.set_user_attr('full_params', json.dumps(params))
             skf_inner = StratifiedKFold(n_splits=self.n_inner, shuffle=True, random_state=inner_seed)
             
             clf_clone = clone(estimator)
             clf_clone.set_params(**params)
             
             inner_pipe = Pipeline([
-                ('pre', self.get_preprocessing_pipeline()),
+                ('pre', self.get_preprocessing_pipeline(cat_categories=cat_categories)),
                 ('clf', clf_clone)
             ])
             scores = []
@@ -166,9 +177,9 @@ class HeartDiseasernCV:
         return json.loads(study.best_trial.user_attrs['full_params'])
 
 
-    def train_final_model(self, X, y, winner_clf, best_params):
+    def train_final_model(self, X, y, winner_clf, best_params, cat_categories=None):
         
-        # Final Model for deployment
+        # Final Model for deployment (it isn't used in the notebook, but it's here for completeness and future use)
 
         project_dir = Path(__file__).resolve().parent.parent
         file_name = "best_model.pkl"
@@ -177,7 +188,7 @@ class HeartDiseasernCV:
         file_path = models_dir / file_name
 
         final_pipe = Pipeline([
-            ('pre', self.get_preprocessing_pipeline()),
+            ('pre', self.get_preprocessing_pipeline(cat_categories=cat_categories)),
             ('clf', clone(winner_clf).set_params(**best_params))
         ])
         final_pipe.fit(X, y)
