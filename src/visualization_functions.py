@@ -1,14 +1,17 @@
 from pathlib import Path
-
 import pandas as pd
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+from sklearn.decomposition import KernelPCA
+from sklearn.impute import SimpleImputer
 
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-figures_save_path = Path.home() / "Pictures"
+_THIS_DIR = Path(__file__).resolve().parent
+figures_save_path = _THIS_DIR.parent / 'figures'
+figures_save_path.mkdir(parents=True, exist_ok=True)
 
 def summarize_dataset(df, title, dim1_comment=None, dim2_comment=None, filename="dataset_summary.png"):
     
@@ -59,7 +62,7 @@ def summarize_dataset(df, title, dim1_comment=None, dim2_comment=None, filename=
             summary_rows.append([f"{col} - Continuous - {series.dtype}"])
             
             # Stats
-            summary_rows.append([f"  Mean $\pm$ Std : {series.mean():.2f} $\pm$ {series.std():.2f}"])
+            summary_rows.append([f"  Mean \u00b1 Std : {series.mean():.2f} \u00b1 {series.std():.2f}"])
             
             q1, q3 = series.quantile([0.25, 0.75])
             iqr = q3 - q1
@@ -114,7 +117,7 @@ def plot_feature_distributions(df, target='num', filename="feature_distributions
 
     save_path = figures_save_path / filename
 
-    num_features = ['age', 'trestbps', 'chol', 'thalach', 'oldpeak']
+    num_features = ['age', 'trestbps', 'chol', 'thalach', 'oldpeak', 'ca']
     plt.figure(figsize=(15, 10))
     for i, col in enumerate(num_features, 1):
         plt.subplot(2, 3, i)
@@ -131,7 +134,7 @@ def plot_correlation_heatmap(df, filename="correlation_heatmap.png"):
     save_path = figures_save_path / filename
 
     plt.figure(figsize=(12, 10))
-    correlation = df.corr()
+    correlation = df.select_dtypes(include='number').corr()
     sns.heatmap(correlation, annot=True, cmap='coolwarm', fmt=".2f")
     plt.title("Feature Correlation Heatmap")
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -148,7 +151,8 @@ def plot_pca_separability(df, target='num', filename="pca_separability.png"):
     X = temp_df.drop(columns=[target])
     y = temp_df[target]
     
-    X_scaled = StandardScaler().fit_transform(X)
+    X_imp = SimpleImputer(strategy='median').fit_transform(X)
+    X_scaled = StandardScaler().fit_transform(X_imp)
     pca = PCA(n_components=2)
     components = pca.fit_transform(X_scaled)
     
@@ -158,5 +162,29 @@ def plot_pca_separability(df, target='num', filename="pca_separability.png"):
     plt.ylabel(f'PCA 2 ({pca.explained_variance_ratio_[1]:.2%} var)')
     plt.title("PCA: 2D Projection for Class Separability")
     plt.colorbar(label='Heart Disease (num)')
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.show()
+
+
+def plot_kernel_pca(df, target='num', filename="kernel_pca.png"):
+
+    # Applies RBF kernel to find non-linear separability
+
+    save_path = figures_save_path / filename
+
+    temp_df = df.dropna()
+    X = temp_df.drop(columns=[target])
+    y = temp_df[target]
+    
+    X_imp = SimpleImputer(strategy='median').fit_transform(X)
+    X_scaled = StandardScaler().fit_transform(X_imp)
+    
+    # Using RBF kernel to project into non-linear space
+    kpca = KernelPCA(n_components=2, kernel="rbf", gamma=0.1)
+    components = kpca.fit_transform(X_scaled)
+    
+    plt.figure(figsize=(8, 6))
+    plt.scatter(components[:, 0], components[:, 1], c=y, cmap='plasma', edgecolors='k')
+    plt.title("Kernel PCA (RBF): Seeking Non-linear Separability")
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.show()
